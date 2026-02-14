@@ -115,3 +115,17 @@ function changeLayer(v) {
     document.getElementById('layer-display').innerText = currentLayer;
     draw();
 }
+
+async function exportToPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('landscape'); 
+
+    // Canvasを画像データ(PNG)に変換
+    const imageData = canvas.toDataURL("image/png");
+
+    const width = doc.internal.pageSize.getWidth();
+    const height = doc.internal.pageSize.getHeight();
+    doc.addImage(imageData, 'PNG', 0, 0, width, height);
+
+    doc.save(`blueprint-layer-${currentLayer}.pdf`);
+}
