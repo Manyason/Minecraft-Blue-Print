@@ -30,6 +30,17 @@
         <div class="shortcuts">
             <small>ズーム: Wheel | 移動: (移動モード)Drag</small>
         </div>
+        <div class="save-area">
+        <input type="text" id="design-name" placeholder="設計図の名前">
+        <button onclick="saveDesignToServer()" style="background: #27ae60;">SQLに保存</button>
+        </div>
+        <div class="load-area">
+        <select id="design-select">
+            <option value="">-- 設計図を選択 --</option>
+        </select>
+        <button onclick="fetchDesignList()">更新</button>
+        <button onclick="loadDesignFromServer()" style="background: #3498db;">読み込み</button>
+        </div>
     </div>
     <canvas id="editorCanvas"></canvas>
     <script src="{% static 'core/js/editor.js' %}"></script>
