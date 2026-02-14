@@ -1,0 +1,35 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Minecraft Blueprint Tool</title>
+    <link rel="stylesheet" href="{% static 'core/css/design.css' %}">
+</head>
+<body>
+    <div id="toolbar">
+        <div class="mode-indicator">
+            現在のモード: <span id="current-mode">編集</span> (Mキーで切替)
+        </div>
+        <hr>
+        <div class="layer-control">
+            <button id="btn-layer-down">下層 (Q)</button>
+            <span>階層: <span id="layer-display">0</span>F</span>
+            <button id="btn-layer-up">上層 (E)</button>
+        </div>
+        <div class="view-options">
+            <label><input type="checkbox" id="ghost-layer-toggle" checked> 下階を透過</label>
+        </div>
+        <div class="element-select">
+            <button onclick="setElement('wall')" style="background: #555;">壁</button>
+            <button onclick="setElement('floor')" style="background: #aa8844;">床</button>
+            <button onclick="setElement('space')" style="background: #222;">消しゴム</button>
+        </div>
+        <div class="shortcuts">
+            <small>ズーム: Wheel | 移動: (移動モード)Drag</small>
+        </div>
+    </div>
+    <canvas id="editorCanvas"></canvas>
+    <script src="{% static 'core/js/editor.js' %}"></script>
+</body>
+</html>

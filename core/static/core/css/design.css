@@ -1,0 +1,11 @@
+body { margin: 0; overflow: hidden; background: #1a1a1a; color: #eee; font-family: 'Segoe UI', sans-serif; }
+#toolbar {
+    position: absolute; top: 20px; left: 20px; z-index: 10;
+    background: rgba(40, 40, 40, 0.9); padding: 15px; border-radius: 10px;
+    border: 1px solid #444; width: 180px;
+}
+#editorCanvas { display: block; cursor: crosshair; }
+button { width: 100%; margin: 4px 0; padding: 8px; cursor: pointer; border: none; border-radius: 4px; background: #444; color: white; }
+button:hover { background: #666; }
+.mode-indicator { font-weight: bold; color: #00ffcc; margin-bottom: 5px; }
+hr { border: 0; border-top: 1px solid #555; margin: 10px 0; }
