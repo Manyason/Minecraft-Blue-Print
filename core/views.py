@@ -1,40 +1,75 @@
-from django.shortcuts import render
 import json
-from django.http import JsonResponse
+import io
+
+# Django関連のインポート
+from django.shortcuts import render
+from django.http import JsonResponse, FileResponse, HttpResponse  # HttpResponseを追加
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.models import User
+
+# アプリ内モデルのインポート
 from .models import Design, Cell
 
-@csrf_exempt # 今回は簡略化のため。本来はCSRFトークンを送るのが望ましいです
+# PDF生成関連（ReportLab）のインポート
+from reportlab.pdfgen import canvas as pdf_canvas
+from reportlab.lib.pagesizes import A4, landscape  
+
+# --- 拡張用の設定変数 ---
+# PDFに描画し、寸法計算の対象とするブロックの種類
+VALID_BLOCK_TYPES = ['wall', 'floor'] 
+
+# 各ブロックの描画色 (RGB: 0.0 ~ 1.0)
+BLOCK_COLORS = {
+    'wall': (0.2, 0.2, 0.2),   # 濃いグレー
+    'floor': (0.7, 0.6, 0.4),  # 木材色
+    # 今後 'glass': (0.8, 0.9, 1.0) など、ここに追加するだけでOK
+}
+
+def get_current_user(request):
+    """ログインしていればそのユーザーを、してなければ最初のユーザーを返す(開発用)"""
+    if request.user.is_authenticated:
+        return request.user
+    return User.objects.first()
+
+@csrf_exempt
 def save_design(request):
     if request.method == 'POST':
+        user = get_current_user(request)
         data = json.loads(request.body)
         design_name = data.get('name')
-        cells = data.get('cells') # { "z": { "x": { "y": "type" } } }
+        cells = data.get('cells', {})
 
-        # 設計図を新規作成または更新
         design, created = Design.objects.get_or_create(
-            user=request.user, 
+            user=user,
             name=design_name
         )
 
-        # 既存のセルを一旦削除して書き直し（シンプルにするため）
+        # 既存のセルを一旦削除
         Cell.objects.filter(design=design).delete()
 
-        # データをフラットにして一括保存
         cell_instances = []
         for z, x_map in cells.items():
             for x, y_map in x_map.items():
                 for y, elem_type in y_map.items():
+                    # --- ここが重要：elem_type が空（消しゴム）なら保存しない ---
+                    if not elem_type or elem_type == "":
+                        continue
+                    
                     cell_instances.append(Cell(
-                        design=design, x=x, y=y, z=z, element_type=elem_type
+                        design=design,
+                        x=int(x),
+                        y=int(y),
+                        z=int(z),
+                        element_type=elem_type
                     ))
-        Cell.objects.bulk_create(cell_instances)
 
-        return JsonResponse({'status': 'success'})
+        Cell.objects.bulk_create(cell_instances)
+        return JsonResponse({'status': 'success', 'design_id': design.id})
     
 # 設計図一覧を取得
 def list_designs(request):
-    designs = Design.objects.filter(user=request.user).values('id', 'name')
+    user = get_current_user(request)
+    designs = Design.objects.filter(user=user).values('id', 'name')
     return JsonResponse(list(designs), safe=False)
 
 # 特定の設計図のセルデータを取得
@@ -54,3 +89,122 @@ def load_design(request, design_id):
 def design_editor(request):
     return render(request, 'core/design_editor.html')
 # Create your views here.
+
+@csrf_exempt
+def export_pdf_server(request, design_id):
+    try:
+        user = get_current_user(request)
+        design = Design.objects.get(id=design_id, user=user)
+    except Design.DoesNotExist:
+        return HttpResponse("Design not found", status=404)
+
+    cells = Cell.objects.filter(design=design)
+    
+    # データを変換 (VALID_BLOCK_TYPES に含まれるもののみ抽出)
+    design_data = {}
+    for cell in cells:
+        if not cell.element_type or cell.element_type not in VALID_BLOCK_TYPES:
+            continue
+        z_k, x_k, y_k = str(cell.z), str(cell.x), str(cell.y)
+        if z_k not in design_data: design_data[z_k] = {}
+        if x_k not in design_data[z_k]: design_data[z_k][x_k] = {}
+        design_data[z_k][x_k][y_k] = cell.element_type
+
+    buffer = io.BytesIO()
+    p = pdf_canvas.Canvas(buffer, pagesize=landscape(A4))
+    width, height = landscape(A4)
+    scale = 15 
+    origin_x, origin_y = width / 2, height / 2
+
+    layers = sorted([int(k) for k in design_data.keys()])
+    
+    for z in layers:
+        z_str = str(z)
+        current_layer_cells = design_data.get(z_str, {})
+        if not current_layer_cells: continue
+        if z != layers[0]: p.showPage()
+
+        # --- 1. グリッドと基準線 ---
+        p.setStrokeColorRGB(0.85, 0.85, 0.85)
+        for i in range(-30, 31):
+            p.setLineWidth(0.8 if i % 5 == 0 else 0.2)
+            p.line(origin_x + i*scale, 0, origin_x + i*scale, height)
+            p.line(0, origin_y + i*scale, width, origin_y + i*scale)
+        p.setLineWidth(1.5)
+        p.setStrokeColorRGB(0, 1, 1); p.line(origin_x, 0, origin_x, height)
+        p.setStrokeColorRGB(1, 0, 1); p.line(0, origin_y, width, origin_y)
+
+        # --- 2. セル描画 ---
+        for x_str, y_map in current_layer_cells.items():
+            for y_str, elem_type in y_map.items():
+                try:
+                    x, y = int(x_str), int(y_str)
+                    color = BLOCK_COLORS.get(elem_type, (0.5, 0.5, 0.5)) # 未定義ならグレー
+                    p.setFillColorRGB(*color)
+                    p.rect(origin_x + x*scale, origin_y - (y+1)*scale, scale, scale, fill=1, stroke=0)
+                except: continue
+
+        # --- 3. 自動寸法入力 ---
+        p.setFont("Helvetica-Bold", 10)
+        p.setFillColorRGB(0.1, 0.1, 0.8)
+
+        def is_occupied(cx, cy):
+            # 指定座標に有効なブロックが存在するか
+            return current_layer_cells.get(str(cx), {}).get(str(cy)) in VALID_BLOCK_TYPES
+
+        # 横方向の辺判定
+        y_coords = sorted(set(int(y) for xm in current_layer_cells.values() for y in xm.keys()))
+        for y in y_coords:
+            xs = sorted([int(x) for x in current_layer_cells.keys() if str(y) in current_layer_cells[x]])
+            tops = [x for x in xs if not is_occupied(x, y-1)]
+            bots = [x for x in xs if not is_occupied(x, y+1)]
+
+            def draw_h_segs(edge_xs, offset_y):
+                if not edge_xs: return
+                idx = 0
+                while idx < len(edge_xs):
+                    start = edge_xs[idx]
+                    while idx + 1 < len(edge_xs) and edge_xs[idx+1] == edge_xs[idx] + 1: idx += 1
+                    end = edge_xs[idx]
+                    length = end - start + 1
+                    if length > 1:
+                        p.drawString(origin_x + (start + end)/2 * scale + 2, origin_y - y*scale + offset_y, f"{length}")
+                    idx += 1
+            draw_h_segs(tops, 3); draw_h_segs(bots, -scale - 11)
+
+        # 縦方向の辺判定
+        x_coords = sorted(set(int(x) for x in current_layer_cells.keys()))
+        for x in x_coords:
+            ys = sorted([int(y) for y in current_layer_cells[str(x)].keys()])
+            lefts = [y for y in ys if not is_occupied(x-1, y)]
+            rights = [y for y in ys if not is_occupied(x+1, y)]
+
+            def draw_v_segs(edge_ys, offset_x):
+                if not edge_ys: return
+                idx = 0
+                while idx < len(edge_ys):
+                    start = edge_ys[idx]
+                    while idx + 1 < len(edge_ys) and edge_ys[idx+1] == edge_ys[idx] + 1: idx += 1
+                    end = edge_ys[idx]
+                    length = end - start + 1
+                    if length > 1:
+                        p.drawString(origin_x + x*scale + offset_x, origin_y - (start + end + 1)/2 * scale - 4, f"{length}")
+                    idx += 1
+            draw_v_segs(lefts, -15); draw_v_segs(rights, scale + 4)
+
+        # --- 4. 凡例とヘッダー ---
+        p.setFillColorRGB(0, 0, 0); p.setFont("Helvetica-Bold", 14)
+        p.drawString(30, height - 30, f"Design: {design.name} ({z}F)")
+        
+        # 凡例ボックス (VALID_BLOCK_TYPES に基づいて動的に生成も可能ですが、まずは固定)
+        p.setLineWidth(1); p.rect(width - 80, 30, 60, 45, fill=0)
+        p.setFont("Helvetica", 8)
+        # Wall
+        p.setFillColorRGB(*BLOCK_COLORS['wall']); p.rect(width - 75, 60, 8, 8, fill=1)
+        p.setFillColorRGB(0, 0, 0); p.drawString(width - 62, 61, "Wall")
+        # Floor
+        p.setFillColorRGB(*BLOCK_COLORS['floor']); p.rect(width - 75, 40, 8, 8, fill=1)
+        p.setFillColorRGB(0, 0, 0); p.drawString(width - 62, 41, "Floor")
+
+    p.save(); buffer.seek(0)
+    return FileResponse(buffer, as_attachment=True, filename=f"blueprint_{design.name}.pdf")

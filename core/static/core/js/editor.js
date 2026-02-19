@@ -145,21 +145,24 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => isDragging = false);
 
 function editCell(mouseX, mouseY) {
-    // Canvasの画面上の位置とサイズを取得
     const rect = canvas.getBoundingClientRect();
-    
-    // ブラウザの座標(mouseX/Y)からCanvas内の相対座標に変換
     const canvasX = mouseX - rect.left;
     const canvasY = mouseY - rect.top;
 
-    // オフセットとスケールを考慮してグリッド座標を算出
     const gridX = Math.floor((canvasX - offsetX) / scale);
     const gridY = Math.floor((canvasY - offsetY) / scale);
 
     if (!designData[currentLayer]) designData[currentLayer] = {};
     if (!designData[currentLayer][gridX]) designData[currentLayer][gridX] = {};
-    
-    designData[currentLayer][gridX][gridY] = currentElement;
+
+    if (currentElement === 'eraser') {
+        // 消しゴムの場合はデータを削除
+        delete designData[currentLayer][gridX][gridY];
+    } else {
+        // 壁や床を塗る
+        designData[currentLayer][gridX][gridY] = currentElement;
+    }
+    draw();
 }
 
 function setElement(t) { currentElement = t; }
@@ -170,64 +173,49 @@ function changeLayer(v) {
 }
 
 async function exportToPDF() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('landscape');
-    
-    // 存在する階層（Z軸）のリストを取得して昇順にソート
-    const layers = Object.keys(designData).map(Number).sort((a, b) => a - b);
-    
-    if (layers.length === 0) {
-        alert("出力するデータがありません。");
+    // 1. まず現在の状態を確実にSQLへ保存する
+    await saveDesignToServer(); 
+
+    const select = document.getElementById('design-select');
+    let designId = select.value;
+
+    // もし新規保存直後でセレクトボックスにIDがない場合、
+    // 名前が入力されていればリストを再取得して一致するものを探す
+    if (!designId) {
+        await fetchDesignList(); // 一覧を再読み込み
+        const nameInput = document.getElementById('design-name').value;
+        const options = Array.from(select.options);
+        const found = options.find(opt => opt.textContent === nameInput);
+        if (found) {
+            designId = found.value;
+            select.value = designId;
+        }
+    }
+
+    if (!designId) {
+        alert("保存された設計図のIDが見つかりません。一度保存ボタンを押してください。");
         return;
     }
 
-    let isFirstPage = true;
+    // 2. GETリクエストによる直接ダウンロード
+    // これがブラウザにとって最も標準的なダウンロードフローです
+    window.location.href = `/export-pdf/${designId}/`;
+}
 
-    for (const z of layers) {
-        // その階層に中身（セル）があるかチェック
-        const xKeys = Object.keys(designData[z]);
-        let hasContent = false;
-        for (const x of xKeys) {
-            if (Object.keys(designData[z][x]).length > 0) {
-                hasContent = true;
+// CSRFトークン取得用のヘルパー関数
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
                 break;
             }
         }
-
-        if (!hasContent) continue; // 中身が空ならスキップ
-
-        // 1ページ目以外は新しいページを追加
-        if (!isFirstPage) {
-            doc.addPage();
-        }
-
-        // --- 指定した階層をCanvasに一時描画 ---
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // 背景とグリッドを先に描画（必要なら）
-        drawGrid();
-        
-        // 対象の階層を描画
-        drawLayer(z);
-        
-        // 階層番号をテキストで追加（任意）
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "20px sans-serif";
-        ctx.fillText(`Layer: ${z}F`, 20, canvas.height - 20);
-
-        // --- PDFに変換 ---
-        const imageData = canvas.toDataURL("image/png");
-        const width = doc.internal.pageSize.getWidth();
-        const height = doc.internal.pageSize.getHeight();
-        doc.addImage(imageData, 'PNG', 0, 0, width, height);
-
-        isFirstPage = false;
     }
-
-    // 最後に現在の表示状態（編集中の階層）に戻して再描画
-    draw();
-
-    doc.save(`minecraft-blueprint-all-layers.pdf`);
+    return cookieValue;
 }
 
 async function saveDesignToServer() {
