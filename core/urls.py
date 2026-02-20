@@ -6,4 +6,5 @@ urlpatterns = [
     path('save-design/', views.save_design, name='save_design'),
     path('list-designs/', views.list_designs, name='list_designs'),
     path('load-design/<int:design_id>/', views.load_design, name='load_design'),
+    path('export-pdf/<int:design_id>/', views.export_pdf_server, name='export_pdf_server'),
 ]

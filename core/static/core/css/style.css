@@ -1,0 +1,108 @@
+/* レイアウトの基本設定 */
+body {
+    background-color: #222;
+    color: #eee;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* サイドバー */
+#sidebar {
+    width: 300px;
+    background-color: #333;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.5);
+    z-index: 10;
+}
+
+/* キャンバスコンテナ */
+#canvas-container {
+    flex-grow: 1;
+    position: relative;
+    background-color: #1a1a1a;
+    cursor: crosshair;
+}
+
+canvas {
+    display: block;
+}
+
+/* 見出し・セクション */
+h2 {
+    color: #00ffcc;
+    margin-top: 0;
+    font-size: 1.2em;
+}
+
+.ui-section {
+    margin-bottom: 20px;
+    padding: 10px;
+    background: #444;
+    border-radius: 5px;
+}
+
+.label-text {
+    font-size: 0.8em;
+    color: #ccc;
+    margin-bottom: 5px;
+    display: block;
+}
+
+/* ブロック選択ツールバー */
+#block-controls {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.layer-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+/* ボタン共通設定 */
+button {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: opacity 0.2s;
+}
+
+button:hover {
+    opacity: 0.8;
+}
+
+/* ボタンバリエーション */
+.btn-primary { background-color: #00ffcc; color: #333; }
+.btn-secondary { background-color: #555; color: white; }
+.btn-save { background-color: #28a745; color: white; width: 100%; }
+.btn-export { background-color: #ff9900; color: white; width: 100%; margin-top: 10px; }
+
+/* 入力フォーム */
+input[type="number"], input[type="text"], select {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    background: #222;
+    color: #00ffcc;
+    border: 1px solid #666;
+    border-radius: 3px;
+    box-sizing: border-box;
+}
+
+/* 選択中の情報表示 */
+#selected-info {
+    font-size: 0.9em;
+    color: #00ffcc;
+    margin-top: 5px;
+}

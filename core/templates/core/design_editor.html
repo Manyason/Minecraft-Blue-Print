@@ -5,8 +5,6 @@
     <meta charset="UTF-8">
     <title>Minecraft Blueprint Tool</title>
     <link rel="stylesheet" href="{% static 'core/css/design.css' %}">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <button onclick="exportToPDF()" style="background: #2c3e50;">PDFで出力</button>
 </head>
 <body>
     <div id="toolbar">
@@ -14,35 +12,63 @@
             現在のモード: <span id="current-mode">編集</span> (Mキーで切替)
         </div>
         <hr>
+        
         <div class="layer-control">
-            <button id="btn-layer-down">下層 (Q)</button>
+            <button id="btn-layer-down" onclick="changeLayer(-1)">下層 (Q)</button>
             <span>階層: <span id="layer-display">0</span>F</span>
-            <button id="btn-layer-up">上層 (E)</button>
+            <button id="btn-layer-up" onclick="changeLayer(1)">上層 (E)</button>
         </div>
+        
         <div class="view-options">
-            <label><input type="checkbox" id="ghost-layer-toggle" checked> 下階を透過</label>
+            <label>
+                <input type="checkbox" id="ghost-layer-toggle" checked onchange="draw()"> 下階を透過表示
+            </label>
         </div>
-        <div class="element-select">
-            <button onclick="setElement('wall')" style="background: #555;">壁</button>
-            <button onclick="setElement('floor')" style="background: #aa8844;">床</button>
-            <button onclick="setElement('space')" style="background: #222;">消しゴム</button>
+
+        <hr>
+
+        <div id="editor-ui">
+            <div class="label-text">ブロックを選択:</div>
+            <div id="block-controls"></div>
+            <div id="selected-info">
+                選択中: <span id="selected-label">壁</span>
+            </div>
+            <button class="btn-eraser" onclick="setElement('eraser')">消しゴム</button>
         </div>
-        <div class="shortcuts">
-            <small>ズーム: Wheel | 移動: (移動モード)Drag</small>
+
+        <hr>
+
+        <div class="config-section">
+            <div class="label-text">フロアの空間高さ (PDF用):</div>
+            <input type="number" id="floor-height" value="3" min="1" max="10">
         </div>
+
+        <hr>
+
         <div class="save-area">
-        <input type="text" id="design-name" placeholder="設計図の名前">
-        <button onclick="saveDesignToServer()" style="background: #27ae60;">SQLに保存</button>
+            <input type="text" id="design-name" placeholder="設計図の名前" value="{{ design.name }}">
+            <button onclick="saveDesignToServer()" style="background: #27ae60;">SQLに保存</button>
         </div>
+        
         <div class="load-area">
-        <select id="design-select">
-            <option value="">-- 設計図を選択 --</option>
-        </select>
-        <button onclick="fetchDesignList()">更新</button>
-        <button onclick="loadDesignFromServer()" style="background: #3498db;">読み込み</button>
+            <select id="design-select">
+                <option value="">-- 設計図を選択 --</option>
+            </select>
+            <div style="display: flex; gap: 2px; margin-top: 5px;">
+                <button onclick="fetchDesignList()" style="flex: 1;">更新</button>
+                <button onclick="loadDesignFromServer()" style="background: #3498db; flex: 2;">読み込み</button>
+            </div>
         </div>
+
+        <button onclick="exportToPDF()" style="background: #ff9900; width: 100%; margin-top: 10px;">PDFで出力</button>
     </div>
+
     <canvas id="editorCanvas"></canvas>
+
+    <script>
+        // グローバル変数として確実に定義
+        window.currentDesignId = "{{ design.id }}";
+    </script>
     <script src="{% static 'core/js/editor.js' %}"></script>
 </body>
 </html>
