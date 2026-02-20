@@ -16,13 +16,15 @@ from reportlab.lib.pagesizes import A4, landscape
 
 # --- 拡張用の設定変数 ---
 # PDFに描画し、寸法計算の対象とするブロックの種類
-VALID_BLOCK_TYPES = ['wall', 'floor'] 
+VALID_BLOCK_TYPES = ['wall', 'floor', 'stairs', 'roof', 'ladder']
 
 # 各ブロックの描画色 (RGB: 0.0 ~ 1.0)
 BLOCK_COLORS = {
-    'wall': (0.2, 0.2, 0.2),   # 濃いグレー
-    'floor': (0.7, 0.6, 0.4),  # 木材色
-    # 今後 'glass': (0.8, 0.9, 1.0) など、ここに追加するだけでOK
+    'wall': (0.2, 0.2, 0.2),    # 濃いグレー
+    'floor': (0.7, 0.6, 0.4),   # 木材色（茶）
+    'stairs': (0.6, 0.4, 0.2),  # 階段（少し濃い茶）
+    'roof': (0.8, 0.2, 0.2),    # 屋根（テラコッタ風の赤）
+    'ladder': (1.0, 0.8, 0.2),  # ハシゴ（目立つ黄色）
 }
 
 def get_current_user(request):
@@ -98,33 +100,46 @@ def export_pdf_server(request, design_id):
     except Design.DoesNotExist:
         return HttpResponse("Design not found", status=404)
 
+    # 動的な高さの取得 (デフォルト3)
+    try:
+        floor_h = int(request.GET.get('height', 3))
+    except ValueError:
+        floor_h = 3
+
     cells = Cell.objects.filter(design=design)
-    
-    # データを変換 (VALID_BLOCK_TYPES に含まれるもののみ抽出)
     design_data = {}
+    material_counts = {k: 0 for k in VALID_BLOCK_TYPES}
+
     for cell in cells:
         if not cell.element_type or cell.element_type not in VALID_BLOCK_TYPES:
             continue
+            
+        # 1. 描画データの整理
         z_k, x_k, y_k = str(cell.z), str(cell.x), str(cell.y)
         if z_k not in design_data: design_data[z_k] = {}
         if x_k not in design_data[z_k]: design_data[z_k][x_k] = {}
         design_data[z_k][x_k][y_k] = cell.element_type
 
+        # 2. 資材計算 (高さ考慮)
+        b_type = cell.element_type
+        if b_type == 'wall' or b_type == 'ladder':
+            material_counts[b_type] += floor_h
+        else:
+            material_counts[b_type] += 1
+
     buffer = io.BytesIO()
     p = pdf_canvas.Canvas(buffer, pagesize=landscape(A4))
     width, height = landscape(A4)
-    scale = 15 
-    origin_x, origin_y = width / 2, height / 2
+    scale, origin_x, origin_y = 15, width / 2, height / 2
 
     layers = sorted([int(k) for k in design_data.keys()])
     
     for z in layers:
-        z_str = str(z)
-        current_layer_cells = design_data.get(z_str, {})
+        current_layer_cells = design_data.get(str(z), {})
         if not current_layer_cells: continue
         if z != layers[0]: p.showPage()
 
-        # --- 1. グリッドと基準線 ---
+        # --- グリッドと基準線 ---
         p.setStrokeColorRGB(0.85, 0.85, 0.85)
         for i in range(-30, 31):
             p.setLineWidth(0.8 if i % 5 == 0 else 0.2)
@@ -134,77 +149,57 @@ def export_pdf_server(request, design_id):
         p.setStrokeColorRGB(0, 1, 1); p.line(origin_x, 0, origin_x, height)
         p.setStrokeColorRGB(1, 0, 1); p.line(0, origin_y, width, origin_y)
 
-        # --- 2. セル描画 ---
+        # --- セル描画 ---
         for x_str, y_map in current_layer_cells.items():
             for y_str, elem_type in y_map.items():
                 try:
-                    x, y = int(x_str), int(y_str)
-                    color = BLOCK_COLORS.get(elem_type, (0.5, 0.5, 0.5)) # 未定義ならグレー
-                    p.setFillColorRGB(*color)
-                    p.rect(origin_x + x*scale, origin_y - (y+1)*scale, scale, scale, fill=1, stroke=0)
+                    p.setFillColorRGB(*BLOCK_COLORS.get(elem_type, (0.5, 0.5, 0.5)))
+                    p.rect(origin_x + int(x_str)*scale, origin_y - (int(y_str)+1)*scale, scale, scale, fill=1, stroke=0)
                 except: continue
 
-        # --- 3. 自動寸法入力 ---
-        p.setFont("Helvetica-Bold", 10)
-        p.setFillColorRGB(0.1, 0.1, 0.8)
-
-        def is_occupied(cx, cy):
-            # 指定座標に有効なブロックが存在するか
-            return current_layer_cells.get(str(cx), {}).get(str(cy)) in VALID_BLOCK_TYPES
-
-        # 横方向の辺判定
+        # --- 寸法入力 ---
+        p.setFont("Helvetica-Bold", 10); p.setFillColorRGB(0.1, 0.1, 0.8)
+        def is_b(cx, cy): return current_layer_cells.get(str(cx), {}).get(str(cy)) in VALID_BLOCK_TYPES
+        
+        # 横方向
         y_coords = sorted(set(int(y) for xm in current_layer_cells.values() for y in xm.keys()))
         for y in y_coords:
             xs = sorted([int(x) for x in current_layer_cells.keys() if str(y) in current_layer_cells[x]])
-            tops = [x for x in xs if not is_occupied(x, y-1)]
-            bots = [x for x in xs if not is_occupied(x, y+1)]
-
-            def draw_h_segs(edge_xs, offset_y):
-                if not edge_xs: return
+            for edges, off_y in [([x for x in xs if not is_b(x, y-1)], 3), ([x for x in xs if not is_b(x, y+1)], -scale-11)]:
+                if not edges: continue
                 idx = 0
-                while idx < len(edge_xs):
-                    start = edge_xs[idx]
-                    while idx + 1 < len(edge_xs) and edge_xs[idx+1] == edge_xs[idx] + 1: idx += 1
-                    end = edge_xs[idx]
-                    length = end - start + 1
-                    if length > 1:
-                        p.drawString(origin_x + (start + end)/2 * scale + 2, origin_y - y*scale + offset_y, f"{length}")
+                while idx < len(edges):
+                    start = edges[idx]
+                    while idx + 1 < len(edges) and edges[idx+1] == edges[idx] + 1: idx += 1
+                    if edges[idx] - start + 1 > 1:
+                        p.drawString(origin_x + (start + edges[idx])/2 * scale + 2, origin_y - y*scale + off_y, f"{edges[idx]-start+1}")
                     idx += 1
-            draw_h_segs(tops, 3); draw_h_segs(bots, -scale - 11)
 
-        # 縦方向の辺判定
-        x_coords = sorted(set(int(x) for x in current_layer_cells.keys()))
-        for x in x_coords:
-            ys = sorted([int(y) for y in current_layer_cells[str(x)].keys()])
-            lefts = [y for y in ys if not is_occupied(x-1, y)]
-            rights = [y for y in ys if not is_occupied(x+1, y)]
-
-            def draw_v_segs(edge_ys, offset_x):
-                if not edge_ys: return
+        # 縦方向
+        for x_str in current_layer_cells.keys():
+            ys = sorted([int(y) for y in current_layer_cells[x_str].keys()])
+            for edges, off_x in [([y for y in ys if not is_b(int(x_str)-1, y)], -15), ([y for y in ys if not is_b(int(x_str)+1, y)], scale+4)]:
+                if not edges: continue
                 idx = 0
-                while idx < len(edge_ys):
-                    start = edge_ys[idx]
-                    while idx + 1 < len(edge_ys) and edge_ys[idx+1] == edge_ys[idx] + 1: idx += 1
-                    end = edge_ys[idx]
-                    length = end - start + 1
-                    if length > 1:
-                        p.drawString(origin_x + x*scale + offset_x, origin_y - (start + end + 1)/2 * scale - 4, f"{length}")
+                while idx < len(edges):
+                    start = edges[idx]
+                    while idx + 1 < len(edges) and edges[idx+1] == edges[idx] + 1: idx += 1
+                    if edges[idx] - start + 1 > 1:
+                        p.drawString(origin_x + int(x_str)*scale + off_x, origin_y - (start + edges[idx]+1)/2 * scale - 4, f"{edges[idx]-start+1}")
                     idx += 1
-            draw_v_segs(lefts, -15); draw_v_segs(rights, scale + 4)
 
-        # --- 4. 凡例とヘッダー ---
-        p.setFillColorRGB(0, 0, 0); p.setFont("Helvetica-Bold", 14)
-        p.drawString(30, height - 30, f"Design: {design.name} ({z}F)")
+        # --- 集計リスト & 凡例 ---
+        p.setFillColorRGB(0.97, 0.97, 0.97); p.rect(width - 145, height - 140, 130, 125, fill=1)
+        p.setFillColorRGB(0, 0, 0); p.setFont("Helvetica-Bold", 10)
+        p.drawString(width - 135, height - 30, f"Material (H:{floor_h})")
+        p.setFont("Helvetica", 9)
+        cur_y = height - 45
+        for b, c in material_counts.items():
+            if c > 0:
+                p.drawString(width - 135, cur_y, f"{b.capitalize()}: {c}")
+                cur_y -= 12
         
-        # 凡例ボックス (VALID_BLOCK_TYPES に基づいて動的に生成も可能ですが、まずは固定)
-        p.setLineWidth(1); p.rect(width - 80, 30, 60, 45, fill=0)
-        p.setFont("Helvetica", 8)
-        # Wall
-        p.setFillColorRGB(*BLOCK_COLORS['wall']); p.rect(width - 75, 60, 8, 8, fill=1)
-        p.setFillColorRGB(0, 0, 0); p.drawString(width - 62, 61, "Wall")
-        # Floor
-        p.setFillColorRGB(*BLOCK_COLORS['floor']); p.rect(width - 75, 40, 8, 8, fill=1)
-        p.setFillColorRGB(0, 0, 0); p.drawString(width - 62, 41, "Floor")
+        p.setFont("Helvetica-Bold", 14); p.drawString(30, height - 30, f"Design: {design.name} ({z}F)")
 
     p.save(); buffer.seek(0)
     return FileResponse(buffer, as_attachment=True, filename=f"blueprint_{design.name}.pdf")
